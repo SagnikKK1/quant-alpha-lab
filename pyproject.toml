@@ -35,3 +35,8 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP", "B"]
+
+[tool.ruff.lint.isort]
+# Deterministic grouping regardless of how the environment resolves paths —
+# local and CI must agree on what is first-party.
+known-first-party = ["alphalab", "tests"]
