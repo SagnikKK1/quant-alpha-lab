@@ -1,0 +1,2 @@
+exchange,market,vip_tier,effective_from,maker_bps,taker_bps,bnb_discount,source,note
+binance,um_futures,VIP0,2019-09-13,2.0,5.0,0.10,https://www.binance.com/en/support/faq/detail/360033544231,"Current official VIP0 rates (verified 2026-07-10). Historical changes are NOT documented by Binance; third-party sources disagree (0.04% vs 0.05% taker pre-2022). Treated as 5bps throughout with the discrepancy covered by the cost_multiplier sensitivity axis; BNB discount not assumed."

@@ -23,8 +23,9 @@ from pathlib import Path
 
 import polars as pl
 
-from alphalab.backtest.costs import CostModel
+from alphalab.backtest.costs import CostModel, load_fee_schedule
 from alphalab.backtest.engine import quantile_weights, run_backtest
+from alphalab.backtest.spreads import abdi_ranaldo_half_spread
 from alphalab.data import store
 from alphalab.data.universe import rolling_universe
 from alphalab.registry.trials import log_trial
@@ -53,7 +54,11 @@ def main() -> int:
     weights = quantile_weights(scores, quantile=args.quantile)
 
     cost_model = CostModel(aum_usd=args.aum)
-    result = run_backtest(klines, weights, funding, cost_model)
+    spreads = abdi_ranaldo_half_spread(klines)  # measured per (symbol, date)
+    fee_schedule = load_fee_schedule()  # sourced, dated (registry/fees.csv)
+    result = run_backtest(
+        klines, weights, funding, cost_model, spreads=spreads, fee_schedule=fee_schedule
+    )
 
     # OOS = union of walk-forward test blocks (baseline fits nothing, but the
     # reporting convention must match what the ML arms will be held to).
@@ -76,10 +81,11 @@ def main() -> int:
         "quantile": args.quantile,
         "universe_top_n": args.top_n,
         "cost_model": {
-            "taker_fee_bps": cost_model.taker_fee_bps,
-            "half_spread_bps": cost_model.half_spread_bps,
+            "taker_fee": "registry/fees.csv (dated schedule, VIP0 no-BNB)",
+            "half_spread": "abdi_ranaldo_hourly w21d floor0.5 cap50",
             "impact_coeff": cost_model.impact_coeff,
             "aum_usd": cost_model.aum_usd,
+            "cost_multiplier": cost_model.cost_multiplier,
         },
         "n_folds": args.n_folds,
         "label_horizon_days": 2,

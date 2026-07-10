@@ -74,8 +74,14 @@ def run_backtest(
     weights: pl.DataFrame,
     funding: pl.DataFrame,
     cost_model: CostModel | None = None,
+    spreads: pl.DataFrame | None = None,  # (symbol, date, half_spread_bps)
+    fee_schedule: pl.DataFrame | None = None,  # (effective_from, taker_bps)
 ) -> BacktestResult:
-    """weights: (date, symbol, weight) decided at date's close."""
+    """weights: (date, symbol, weight) decided at date's close.
+
+    spreads/fee_schedule make costs data-driven per name and per date; when
+    omitted, the CostModel scalar fallbacks apply (unit tests, scenarios).
+    """
     cost_model = cost_model or CostModel()
     daily = daily_frame(klines)
     rets = execution_returns(daily)
@@ -112,9 +118,29 @@ def run_backtest(
         .with_columns((pl.col("weight") - pl.col("w_prev")).alias("dw"))
     )
 
+    fee_expr = spread_expr = None
+    if spreads is not None:
+        pos = pos.join(
+            spreads.select("symbol", "date", "half_spread_bps"),
+            on=["symbol", "date"],
+            how="left",
+        )
+        spread_expr = pl.col("half_spread_bps")
+    if fee_schedule is not None:
+        pos = pos.sort("date").join_asof(
+            fee_schedule.rename({"effective_from": "date", "taker_bps": "taker_fee_bps"}),
+            on="date",
+            strategy="backward",
+        )
+        fee_expr = pl.col("taker_fee_bps")
+
     pos = pos.with_columns(
         cost_model.trade_cost_return(
-            pl.col("dw"), pl.col("sigma"), pl.col("dollar_volume")
+            pl.col("dw"),
+            pl.col("sigma"),
+            pl.col("dollar_volume"),
+            taker_fee_bps=fee_expr,
+            half_spread_bps=spread_expr,
         ).alias("cost"),
         (pl.col("weight") * pl.col("exec_ret").fill_null(0.0)).alias("gross_pnl"),
     )

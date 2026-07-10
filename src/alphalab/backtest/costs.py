@@ -15,19 +15,48 @@ dollar_volume are decision-date values, never future ones.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import polars as pl
 
 
+def load_fee_schedule(path: Path | None = None) -> pl.DataFrame:
+    """Dated fee schedule from registry/fees.csv -> (effective_from,
+    taker_bps). Applied by as-of join on decision date, so a future
+    documented fee change is one CSV row, not a code change."""
+    if path is None:
+        path = Path(__file__).resolve().parents[3] / "registry" / "fees.csv"
+    return (
+        pl.read_csv(path)
+        .with_columns(pl.col("effective_from").str.to_date())
+        .select("effective_from", "taker_bps")
+        .sort("effective_from")
+    )
+
+
 @dataclass(frozen=True)
 class CostModel:
-    taker_fee_bps: float = 5.0  # Binance USDT-M taker, VIP0
-    half_spread_bps: float = 1.0  # top-of-book majors; scenario axis
+    """Scalar fields are FALLBACKS, not facts — production paths feed
+    per-(symbol, date) columns: fees from registry/fees.csv (sourced, dated),
+    half-spreads from the Corwin-Schultz estimator (spreads.py). The scalars
+    exist for unit tests and for scenarios where data-driven inputs are
+    deliberately overridden. cost_multiplier is the "costs ±50%" sensitivity
+    axis from the handoff — it scales fee+spread+impact together.
+    """
+
+    taker_fee_bps: float = 5.0  # fallback; see registry/fees.csv for source
+    half_spread_bps: float = 1.0  # fallback; see spreads.corwin_schultz_half_spread
     impact_coeff: float = 1.0  # Y in Y * sigma_daily * sqrt(participation)
     aum_usd: float = 100_000.0
+    cost_multiplier: float = 1.0
 
     def trade_cost_return(
-        self, traded_weight: pl.Expr, sigma: pl.Expr, dollar_volume: pl.Expr
+        self,
+        traded_weight: pl.Expr,
+        sigma: pl.Expr,
+        dollar_volume: pl.Expr,
+        taker_fee_bps: pl.Expr | None = None,
+        half_spread_bps: pl.Expr | None = None,
     ) -> pl.Expr:
         """Cost of trading |Δw| of AUM in one name, as a portfolio return.
 
@@ -35,13 +64,22 @@ class CostModel:
         Y * sigma * sqrt(Q/V) with Q = |Δw|*AUM and V = the name's daily
         dollar volume (decision date). Result = cost fraction of AUM.
         """
+        fee = (
+            taker_fee_bps.fill_null(self.taker_fee_bps)
+            if taker_fee_bps is not None
+            else pl.lit(self.taker_fee_bps)
+        )
+        spread = (
+            half_spread_bps.fill_null(self.half_spread_bps)
+            if half_spread_bps is not None
+            else pl.lit(self.half_spread_bps)
+        )
         traded = traded_weight.abs()
-        linear_bps = self.taker_fee_bps + self.half_spread_bps
         participation = (traded * self.aum_usd) / pl.max_horizontal(
             dollar_volume, pl.lit(1.0)
         )
         impact = self.impact_coeff * sigma.fill_null(0.0) * participation.sqrt()
-        return traded * (linear_bps / 1e4 + impact)
+        return self.cost_multiplier * traded * ((fee + spread) / 1e4 + impact)
 
 
 def funding_pnl(
