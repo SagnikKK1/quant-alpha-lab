@@ -46,6 +46,16 @@ def monthly_funding_url(symbol: str, month: str) -> str:
     )
 
 
+def daily_kline_url(symbol: str, interval: str, day: str) -> str:
+    """day is 'YYYY-MM-DD'. Used to backfill holes in the monthly zips
+    (verified vendor defect: several 2022 monthly files are missing days that
+    exist in the daily files)."""
+    return (
+        f"{BINANCE_VISION_BASE}/{UM_FUTURES_PREFIX}/daily/klines/"
+        f"{symbol}/{interval}/{symbol}-{interval}-{day}.zip"
+    )
+
+
 def daily_metrics_url(symbol: str, day: str) -> str:
     """day is 'YYYY-MM-DD'. Metrics (OI, long/short ratios) are daily-only."""
     return (
@@ -86,17 +96,26 @@ def download_verified(
     url: str,
     dest: Path | None = None,
     session: requests.Session | None = None,
+    reverify_cached: bool = False,
 ) -> Path | None:
     """Download ``url`` and its .CHECKSUM, verify SHA256, cache under RAW_DIR.
 
     Returns the local path, or None if the remote file doesn't exist (404).
     Raises ValueError on checksum mismatch (the partial file is removed).
+
+    Cached files are trusted by default: only verified bytes are ever written
+    to the cache, and completed monthly archives are immutable upstream —
+    re-fetching ~2 checksums per symbol-month makes re-curation network-bound
+    for no integrity gain. Pass ``reverify_cached=True`` to force the check.
     """
     session = session or requests.Session()
     if dest is None:
         rel = url.removeprefix(BINANCE_VISION_BASE + "/")
         dest = RAW_DIR / rel
     dest.parent.mkdir(parents=True, exist_ok=True)
+
+    if dest.exists() and not reverify_cached:
+        return dest
 
     checksum_body = _fetch(url + ".CHECKSUM", session)
     if checksum_body is None:

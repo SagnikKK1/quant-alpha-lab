@@ -49,6 +49,17 @@ def test_min_days_live_blocks_new_listings(t0):
         assert newest_new["date"].min() >= date(2023, 1, 16) + timedelta(days=7)
 
 
+def test_settled_contract_leaves_universe_immediately(t0):
+    """A delisted symbol's trailing volume must not keep it ranked after its
+    last trading day (the LUNAUSDT bug: 29 phantom membership days)."""
+    alive = make_klines("BTCUSDT", t0, 24 * 60, volume=10.0)
+    dead = make_klines("LUNAUSDT", t0, 24 * 20, volume=1_000_000.0)  # huge, then gone
+    members = rolling_universe(pl.concat([alive, dead]), top_n=2, lookback_days=30,
+                               min_days_live=2)
+    luna_last = members.filter(pl.col("symbol") == "LUNAUSDT")["date"].max()
+    assert luna_last <= date(2023, 1, 20)  # its own last trading day, not +30d
+
+
 def test_rank_is_dense_and_capped(t0):
     panel = pl.concat(
         [make_klines(f"S{i}USDT", t0, 24 * 20, volume=float(10 * (i + 1))) for i in range(6)]

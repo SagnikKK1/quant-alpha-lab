@@ -22,14 +22,18 @@ def find_duplicates(klines: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def find_gaps(klines: pl.DataFrame, interval: str) -> pl.DataFrame:
+def find_gaps(
+    klines: pl.DataFrame, interval: str, exclusions: pl.DataFrame | None = None
+) -> pl.DataFrame:
     """Missing bars between each symbol's first and last observed bar.
 
     Late listings are NOT gaps (the panel is legitimately unbalanced); only
-    holes inside a symbol's own [first, last] range are findings.
+    holes inside a symbol's own [first, last] range are findings. A gap whose
+    missing window lies entirely inside a registered exclusion window (a
+    delist-relist halt — the contract didn't exist) is waived.
     """
     step_ms = INTERVAL_MS[interval]
-    return (
+    gaps = (
         klines.sort("symbol", "open_time")
         .with_columns(
             pl.col("open_time").diff().over("symbol").dt.total_milliseconds().alias("delta_ms")
@@ -38,6 +42,24 @@ def find_gaps(klines: pl.DataFrame, interval: str) -> pl.DataFrame:
         .with_columns(((pl.col("delta_ms") // step_ms) - 1).alias("missing_bars"))
         .select("symbol", "open_time", "delta_ms", "missing_bars")
     )
+    if exclusions is None or exclusions.is_empty() or gaps.is_empty():
+        return gaps
+    waived = (
+        gaps.with_columns(
+            (pl.col("open_time") - pl.duration(milliseconds=pl.col("delta_ms") - step_ms)).alias(
+                "missing_start"
+            ),
+            (pl.col("open_time") - pl.duration(milliseconds=step_ms)).alias("missing_end"),
+        )
+        .join(exclusions.select("symbol", "start_time", "end_time"), on="symbol", how="inner")
+        .filter(
+            (pl.col("missing_start") >= pl.col("start_time"))
+            & (pl.col("missing_end") <= pl.col("end_time"))
+        )
+        .select("symbol", "open_time")
+        .unique()
+    )
+    return gaps.join(waived, on=["symbol", "open_time"], how="anti")
 
 
 def check_grid_alignment(klines: pl.DataFrame, interval: str) -> pl.DataFrame:
@@ -103,11 +125,16 @@ def check_funding_grid(funding: pl.DataFrame, tolerance_s: int = 60) -> pl.DataF
     ).select("symbol", "calc_time", "funding_interval_hours", "off_grid_ms")
 
 
-def run_all(klines: pl.DataFrame, funding: pl.DataFrame, interval: str) -> dict[str, pl.DataFrame]:
+def run_all(
+    klines: pl.DataFrame,
+    funding: pl.DataFrame,
+    interval: str,
+    exclusions: pl.DataFrame | None = None,
+) -> dict[str, pl.DataFrame]:
     """Convenience bundle used by the ingest CLI report."""
     return {
         "duplicates": find_duplicates(klines),
-        "gaps": find_gaps(klines, interval),
+        "gaps": find_gaps(klines, interval, exclusions),
         "grid_alignment": check_grid_alignment(klines, interval),
         "placeholder_runs": find_placeholder_runs(klines),
         "funding_grid": check_funding_grid(funding),

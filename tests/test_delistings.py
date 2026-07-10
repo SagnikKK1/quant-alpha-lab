@@ -70,6 +70,75 @@ def test_funding_truncated_at_settlement_too(t0):
     assert cut["calc_time"].max() <= t0 + timedelta(hours=80)
 
 
+def test_interior_run_inferred_as_exclusion_not_settlement(t0):
+    """The ICPUSDT case: delisted mid-2022, RELISTED later. The placeholder
+    era is interior, so it must become an exclusion window — and must NOT be
+    inferred as a settlement (the symbol is alive today)."""
+    real1 = make_klines("ICPUSDT", t0, 100)
+    halt = make_klines("ICPUSDT", t0 + timedelta(hours=100), 200, volume=0.0, count=0)
+    real2 = make_klines("ICPUSDT", t0 + timedelta(hours=300), 100)
+    panel = pl.concat([real1, halt, real2])
+
+    exclusions = delistings.infer_exclusions(panel)
+    assert exclusions.height == 1
+    assert exclusions["start_time"][0] == t0 + timedelta(hours=100)
+    assert exclusions["end_time"][0] == t0 + timedelta(hours=299)
+    assert delistings.infer_settlements(panel).is_empty()
+
+
+def test_drop_exclusion_windows_removes_only_the_window(t0):
+    real1 = make_klines("ICPUSDT", t0, 100)
+    halt = make_klines("ICPUSDT", t0 + timedelta(hours=100), 200, volume=0.0, count=0)
+    real2 = make_klines("ICPUSDT", t0 + timedelta(hours=300), 100)
+    other = make_klines("BTCUSDT", t0, 400)
+    panel = pl.concat([real1, halt, real2, other])
+
+    exclusions = delistings.infer_exclusions(panel)
+    curated = delistings.drop_exclusion_windows(panel, exclusions)
+    assert curated.filter(pl.col("symbol") == "ICPUSDT").height == 200
+    assert curated.filter(pl.col("symbol") == "BTCUSDT").height == 400
+    assert audits.find_placeholder_runs(curated).is_empty()
+
+
+def test_exclusion_window_extends_to_relist_not_last_placeholder(t0):
+    """ICPUSDT reality: placeholder files STOP weeks before trading resumes,
+    so the inferred window must run to the relist bar, not the last fake bar."""
+    real1 = make_klines("ICPUSDT", t0, 100)
+    fake = make_klines("ICPUSDT", t0 + timedelta(hours=100), 200, volume=0.0, count=0)
+    # nothing at all for hours 300..399 (no files), then trading resumes
+    real2 = make_klines("ICPUSDT", t0 + timedelta(hours=400), 100)
+    panel = pl.concat([real1, fake, real2])
+
+    exclusions = delistings.infer_exclusions(panel)
+    assert exclusions.height == 1
+    assert exclusions["end_time"][0] == t0 + timedelta(hours=399)
+
+
+def test_gap_audit_waives_registered_exclusion_window(t0):
+    """After curation, an exclusion window looks like a hole in the panel;
+    the gap audit must waive exactly that hole and nothing else."""
+    real1 = make_klines("ICPUSDT", t0, 100)
+    real2 = make_klines("ICPUSDT", t0 + timedelta(hours=400), 100)
+    curated = pl.concat([real1, real2])
+    exclusions = pl.DataFrame(
+        {
+            "symbol": ["ICPUSDT"],
+            "start_time": [t0 + timedelta(hours=100)],
+            "end_time": [t0 + timedelta(hours=399)],
+            "source": ["test"],
+        }
+    ).with_columns(
+        pl.col("start_time").dt.replace_time_zone("UTC"),
+        pl.col("end_time").dt.replace_time_zone("UTC"),
+    )
+    assert audits.find_gaps(curated, "1h").height == 1
+    assert audits.find_gaps(curated, "1h", exclusions).is_empty()
+
+    # a DIFFERENT hole is still reported even with the exclusion registered
+    holey = curated.filter(pl.col("open_time") != t0 + timedelta(hours=50))
+    assert audits.find_gaps(holey, "1h", exclusions).height == 1
+
+
 def test_unregistered_symbols_pass_through(t0):
     panel = make_klines("BTCUSDT", t0, 50)
     registry = pl.DataFrame(schema=delistings.REGISTRY_SCHEMA)

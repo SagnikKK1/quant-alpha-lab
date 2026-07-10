@@ -41,14 +41,19 @@ def rolling_universe(
     """
     dv = daily_dollar_volume(klines)
 
-    # Dense (date, symbol) grid over each symbol's [first_seen, panel_end].
+    # Dense (date, symbol) grid over each symbol's OWN [first_seen, last_seen]:
+    # a settled contract must leave the universe with its last trading day —
+    # otherwise its decaying trailing volume keeps a dead, untradeable name
+    # ranked for up to `lookback_days` after settlement (observed on LUNAUSDT).
+    # Whether a contract trades on date D is point-in-time knowledge.
     dates = dv.select(pl.col("date").unique().sort()).with_columns(pl.lit(1).alias("_j"))
-    firsts = dv.group_by("symbol").agg(pl.col("date").min().alias("first_seen")).with_columns(
-        pl.lit(1).alias("_j")
-    )
+    spans = dv.group_by("symbol").agg(
+        pl.col("date").min().alias("first_seen"),
+        pl.col("date").max().alias("last_seen"),
+    ).with_columns(pl.lit(1).alias("_j"))
     grid = (
-        dates.join(firsts, on="_j")
-        .filter(pl.col("date") >= pl.col("first_seen"))
+        dates.join(spans, on="_j")
+        .filter((pl.col("date") >= pl.col("first_seen")) & (pl.col("date") <= pl.col("last_seen")))
         .select("date", "symbol", "first_seen")
     )
     dense = grid.join(dv, on=["date", "symbol"], how="left").with_columns(
