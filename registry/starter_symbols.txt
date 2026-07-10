@@ -1,0 +1,48 @@
+# Starter ingest set: liquid USDT-M perps + known delistings (SRM/FTT/LUNA/RAY
+# settled 2022; MATIC renamed to POL and delisted 2024) so the settlement
+# machinery is exercised by real data, not just fixtures. The definitive
+# time-varying universe comes from rolling volume ranks once the panel is in.
+BTCUSDT
+ETHUSDT
+BNBUSDT
+XRPUSDT
+ADAUSDT
+DOGEUSDT
+SOLUSDT
+LTCUSDT
+DOTUSDT
+LINKUSDT
+AVAXUSDT
+MATICUSDT
+ATOMUSDT
+UNIUSDT
+ETCUSDT
+FILUSDT
+TRXUSDT
+NEARUSDT
+APTUSDT
+ARBUSDT
+OPUSDT
+AAVEUSDT
+SUSHIUSDT
+XLMUSDT
+VETUSDT
+ALGOUSDT
+ICPUSDT
+SANDUSDT
+MANAUSDT
+AXSUSDT
+EOSUSDT
+THETAUSDT
+XTZUSDT
+BCHUSDT
+CRVUSDT
+SNXUSDT
+COMPUSDT
+YFIUSDT
+1000SHIBUSDT
+GALAUSDT
+SRMUSDT
+FTTUSDT
+LUNAUSDT
+RAYUSDT
