@@ -42,7 +42,6 @@ def render_tearsheet(
     """pnl: (date, gross_ret, cost, funding_pnl, net_ret, turnover, ...)."""
     dates = pnl["date"].to_list()
     net = pnl["net_ret"].to_numpy()
-    gross = pnl["gross_ret"].to_numpy()
     eq_net = (1 + pnl["net_ret"]).cum_prod().to_numpy()
     eq_gross = (1 + pnl["gross_ret"]).cum_prod().to_numpy()
     peak = pl.Series(eq_net).cum_max().to_numpy()
