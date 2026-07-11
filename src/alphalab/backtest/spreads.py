@@ -27,6 +27,56 @@ from __future__ import annotations
 import polars as pl
 
 
+def tick_bound_half_spread(
+    klines: pl.DataFrame,
+    window_days: int = 21,
+    min_days: int = 5,
+    cap_bps: float = 50.0,
+) -> pl.DataFrame:
+    """(symbol, date, half_spread_bps) = tick_size / (2 * price) — the
+    STRUCTURAL spread model, and the primary one.
+
+    Validated against real Binance bookTicker quotes (2023-06..2024-02,
+    reports/spread_validation.csv): for every sampled liquid perp the median
+    quoted spread equals exactly ONE TICK — BTC 0.019bps, DOGE 0.81bps,
+    SAND 1.67bps, XTZ 7.6bps, CRV 12.0bps all match tick/(2*price) to ~3
+    decimals. On this venue the spread is set by the price grid, not by a
+    statistical process; the Abdi-Ranaldo estimator (below) is retained as a
+    stress diagnostic, not the charged cost (its vol-noise floor overcharged
+    majors ~100x, which the same validation exposed).
+
+    Tick size is inferred PIT from our own data: the minimum nonzero
+    |close-to-close| increment over a trailing window (hourly bars, so ~500
+    samples — an active name touches adjacent ticks many times a day).
+    Adapts within days when the venue re-tiers a symbol's tick.
+    """
+    hourly = (
+        klines.sort("symbol", "open_time")
+        .with_columns(
+            pl.col("close").diff().abs().over("symbol").alias("_dp"),
+        )
+        .with_columns(pl.when(pl.col("_dp") > 0).then(pl.col("_dp")).alias("_tick"))
+        .with_columns(
+            pl.col("_tick")
+            .rolling_min(window_size=window_days * 24, min_samples=min_days * 24)
+            .over("symbol")
+            .alias("_tick_est")
+        )
+    )
+    return (
+        hourly.drop_nulls("_tick_est")
+        .with_columns(
+            (pl.col("_tick_est") / (2.0 * pl.col("close")) * 1e4)
+            .clip(upper_bound=cap_bps)
+            .alias("half_spread_bps"),
+            pl.col("open_time").dt.date().alias("date"),
+        )
+        .group_by("symbol", "date", maintain_order=True)
+        .agg(pl.col("half_spread_bps").last())
+        .select("symbol", "date", "half_spread_bps")
+    )
+
+
 def abdi_ranaldo_half_spread(
     klines: pl.DataFrame,
     window_days: int = 21,

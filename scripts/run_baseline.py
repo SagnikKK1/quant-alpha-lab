@@ -25,7 +25,7 @@ import polars as pl
 
 from alphalab.backtest.costs import CostModel, load_fee_schedule
 from alphalab.backtest.engine import quantile_weights, run_backtest
-from alphalab.backtest.spreads import abdi_ranaldo_half_spread
+from alphalab.backtest.spreads import tick_bound_half_spread
 from alphalab.data import store
 from alphalab.data.universe import rolling_universe
 from alphalab.registry.trials import log_trial
@@ -54,7 +54,9 @@ def main() -> int:
     weights = quantile_weights(scores, quantile=args.quantile)
 
     cost_model = CostModel(aum_usd=args.aum)
-    spreads = abdi_ranaldo_half_spread(klines)  # measured per (symbol, date)
+    # Structural spread model, validated vs real bookTicker quotes to 1.6%
+    # median error (reports/spread_validation.csv)
+    spreads = tick_bound_half_spread(klines)
     fee_schedule = load_fee_schedule()  # sourced, dated (registry/fees.csv)
     result = run_backtest(
         klines, weights, funding, cost_model, spreads=spreads, fee_schedule=fee_schedule
@@ -82,7 +84,7 @@ def main() -> int:
         "universe_top_n": args.top_n,
         "cost_model": {
             "taker_fee": "registry/fees.csv (dated schedule, VIP0 no-BNB)",
-            "half_spread": "abdi_ranaldo_hourly w21d floor0.5 cap50",
+            "half_spread": "tick_bound w21d cap50 (bookTicker-validated 1.6%)",
             "impact_coeff": cost_model.impact_coeff,
             "size_sensitivity": cost_model.size_sensitivity,
             "volume_sensitivity": cost_model.volume_sensitivity,

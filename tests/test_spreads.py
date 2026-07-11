@@ -88,6 +88,58 @@ def test_floor_and_cap_applied(t0):
     assert est["half_spread_bps"].min() >= 0.5
 
 
+def _tick_grid_panel(symbol, t0, n_days, tick, price0, seed=9):
+    """Prices that live on a tick grid and frequently move by exactly one
+    tick — the structure real Binance perps showed in validation."""
+    rng = np.random.default_rng(seed)
+    n = n_days * 24
+    steps = rng.choice([-2, -1, -1, 0, 1, 1, 2], size=n)
+    price = price0 + np.cumsum(steps) * tick
+    kl = make_klines(symbol, t0, n)
+    return kl.with_columns(pl.Series("close", price))
+
+
+def test_tick_bound_matches_structural_truth(t0):
+    """half_spread = tick/(2*price): the model validated to 1.6% median
+    error against real bookTicker quotes (reports/spread_validation.csv)."""
+    from alphalab.backtest.spreads import tick_bound_half_spread
+
+    panel = _tick_grid_panel("XTZUSDT", t0, 60, tick=0.001, price0=0.65)
+    est = tick_bound_half_spread(panel)
+    last_close = panel.sort("open_time")["close"][-1]
+    expected = 0.001 / (2 * last_close) * 1e4
+    got = est.sort("date")["half_spread_bps"][-1]
+    assert abs(got - expected) / expected < 0.01
+
+
+def test_tick_bound_is_point_in_time(t0):
+    from alphalab.backtest.spreads import tick_bound_half_spread
+
+    panel = _tick_grid_panel("XTZUSDT", t0, 40, tick=0.001, price0=0.65)
+    cutoff = t0 + timedelta(days=25)
+    full = tick_bound_half_spread(panel)
+    trunc = tick_bound_half_spread(panel.filter(pl.col("open_time") <= cutoff))
+    joined = full.filter(pl.col("date") <= cutoff.date() - timedelta(days=1)).join(
+        trunc, on=["symbol", "date"], suffix="_t"
+    )
+    assert (joined["half_spread_bps"] - joined["half_spread_bps_t"]).abs().max() < 1e-12
+
+
+def test_tick_bound_adapts_to_retiering(t0):
+    """If the venue re-tiers the tick (10x coarser), the estimate follows
+    within the rolling window."""
+    from alphalab.backtest.spreads import tick_bound_half_spread
+
+    fine = _tick_grid_panel("AAAUSDT", t0, 40, tick=0.001, price0=0.65, seed=1)
+    coarse = _tick_grid_panel(
+        "AAAUSDT", t0 + timedelta(days=40), 40, tick=0.01, price0=0.65, seed=2
+    )
+    est = tick_bound_half_spread(pl.concat([fine, coarse]))
+    early = est.filter(pl.col("date") == (t0 + timedelta(days=30)).date())
+    late = est.filter(pl.col("date") == (t0 + timedelta(days=79)).date())
+    assert late["half_spread_bps"][0] > 5 * early["half_spread_bps"][0]
+
+
 def test_engine_uses_per_name_spreads(t0):
     """Same trade, wide-vs-tight spread inputs -> different charged costs."""
     panel = pl.concat([make_klines("AAAUSDT", t0, 24 * 5),
