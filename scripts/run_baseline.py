@@ -84,6 +84,8 @@ def main() -> int:
             "taker_fee": "registry/fees.csv (dated schedule, VIP0 no-BNB)",
             "half_spread": "abdi_ranaldo_hourly w21d floor0.5 cap50",
             "impact_coeff": cost_model.impact_coeff,
+            "size_sensitivity": cost_model.size_sensitivity,
+            "volume_sensitivity": cost_model.volume_sensitivity,
             "aum_usd": cost_model.aum_usd,
             "cost_multiplier": cost_model.cost_multiplier,
         },

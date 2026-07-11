@@ -127,6 +127,78 @@ def test_impact_scales_with_sqrt_participation(t0):
     assert abs(costs[1] / costs[0] - 2**0.5) < 1e-9
 
 
+def _wiggly_panel(t0, days=5):
+    wiggle = (1 + 0.01 * (pl.int_range(pl.len()) % 2)).alias("_w")
+    return pl.concat(
+        [make_klines("AAAUSDT", t0, 24 * days), make_klines("BBBUSDT", t0, 24 * days)]
+    ).with_columns((pl.col("close") * wiggle).alias("close"))
+
+
+def _one_day_cost(panel, cm):
+    weights = pl.DataFrame(
+        {"date": [date(2023, 1, 2)] * 2, "symbol": ["AAAUSDT", "BBBUSDT"],
+         "weight": [0.5, -0.5]}
+    )
+    r = run_backtest(panel, weights, EMPTY_FUNDING, cm)
+    return r.pnl.filter(pl.col("date") == date(2023, 1, 2))["cost"][0]
+
+
+def test_size_sensitivity_is_the_participation_exponent(t0):
+    """Doubling AUM scales impact by 2^beta: sqrt for beta=0.5 (already
+    covered), linear for beta=1."""
+    panel = _wiggly_panel(t0)
+    for beta in (0.5, 0.7, 1.0):
+        cm1 = CostModel(taker_fee_bps=0.0, half_spread_bps=0.0, impact_coeff=1.0,
+                        aum_usd=100_000.0, size_sensitivity=beta)
+        cm2 = CostModel(taker_fee_bps=0.0, half_spread_bps=0.0, impact_coeff=1.0,
+                        aum_usd=200_000.0, size_sensitivity=beta)
+        ratio = _one_day_cost(panel, cm2) / _one_day_cost(panel, cm1)
+        assert abs(ratio - 2**beta) < 1e-9
+
+
+def test_volume_sensitivity_makes_deep_names_cheaper(t0):
+    """kappa > 0: at EQUAL participation, the higher-volume name costs less.
+    Constructed by scaling one symbol's volume and AUM together so
+    participation matches while V differs."""
+    panel = _wiggly_panel(t0)
+    deep = panel.with_columns(
+        pl.when(pl.col("symbol") == "AAAUSDT")
+        .then(pl.col("quote_volume") * 100.0)
+        .otherwise(pl.col("quote_volume"))
+        .alias("quote_volume")
+    )
+    cm = CostModel(taker_fee_bps=0.0, half_spread_bps=0.0, impact_coeff=1.0,
+                   volume_sensitivity=0.3)
+    weights_a = pl.DataFrame(
+        {"date": [date(2023, 1, 2)], "symbol": ["AAAUSDT"], "weight": [0.5]}
+    )
+    weights_b = pl.DataFrame(
+        {"date": [date(2023, 1, 2)], "symbol": ["BBBUSDT"], "weight": [0.5]}
+    )
+    # AAA has 100x volume; give it 100x AUM so participation is identical
+    cost_deep = run_backtest(
+        deep, weights_a, EMPTY_FUNDING,
+        CostModel(0.0, 0.0, 1.0, aum_usd=10_000_000.0, volume_sensitivity=0.3),
+    ).pnl["cost"][0]
+    cost_thin = run_backtest(
+        deep, weights_b, EMPTY_FUNDING,
+        CostModel(0.0, 0.0, 1.0, aum_usd=100_000.0, volume_sensitivity=0.3),
+    ).pnl["cost"][0]
+    assert cost_deep < cost_thin
+    assert abs(cost_deep / cost_thin - (1 / 100.0) ** 0.3) < 1e-6
+    _ = cm  # documented default construction compiles
+
+
+def test_default_exponents_recover_square_root_law(t0):
+    """beta=0.5, kappa=0 must reproduce the pre-generalization model
+    exactly (the sqrt test above pins 2^0.5 scaling)."""
+    panel = _wiggly_panel(t0)
+    base = CostModel(taker_fee_bps=0.0, half_spread_bps=0.0, impact_coeff=1.0)
+    explicit = CostModel(taker_fee_bps=0.0, half_spread_bps=0.0, impact_coeff=1.0,
+                         size_sensitivity=0.5, volume_sensitivity=0.0)
+    assert _one_day_cost(panel, base) == _one_day_cost(panel, explicit)
+
+
 def test_exit_turnover_is_charged(t0):
     """Holding then going flat: the closing trade pays linear costs too."""
     panel = pl.concat([make_klines("AAAUSDT", t0, 24 * 6),

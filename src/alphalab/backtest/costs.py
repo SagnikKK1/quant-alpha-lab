@@ -45,10 +45,22 @@ class CostModel:
     """
 
     taker_fee_bps: float = 5.0  # fallback; see registry/fees.csv for source
-    half_spread_bps: float = 1.0  # fallback; see spreads.corwin_schultz_half_spread
-    impact_coeff: float = 1.0  # Y in Y * sigma_daily * sqrt(participation)
+    half_spread_bps: float = 1.0  # fallback; see spreads.abdi_ranaldo_half_spread
+    impact_coeff: float = 1.0  # alpha in the impact law below
     aum_usd: float = 100_000.0
     cost_multiplier: float = 1.0
+
+    # Impact: alpha * sigma * (Q/V)^beta * (V/V_ref)^(-kappa) — a generalized
+    # power law (Kissell/I-star family); defaults recover the square-root law.
+    # beta/kappa are COST-MODEL hyperparameters: calibrated from the public
+    # tape (log-log panel regression of price response on participation and
+    # volume, with CIs) or swept as scenario axes. They are NEVER tuned
+    # jointly with the strategy — that would launder multiplicity through the
+    # cost model.
+    size_sensitivity: float = 0.5  # beta: participation exponent (lit ~0.4-0.7)
+    volume_sensitivity: float = 0.0  # kappa: residual depth effect at equal
+    # participation (0 = pure participation model)
+    volume_ref_usd: float = 1e9  # V_ref normalizer so alpha's units are stable
 
     def trade_cost_return(
         self,
@@ -75,10 +87,14 @@ class CostModel:
             else pl.lit(self.half_spread_bps)
         )
         traded = traded_weight.abs()
-        participation = (traded * self.aum_usd) / pl.max_horizontal(
-            dollar_volume, pl.lit(1.0)
+        safe_volume = pl.max_horizontal(dollar_volume, pl.lit(1.0))
+        participation = (traded * self.aum_usd) / safe_volume
+        impact = (
+            self.impact_coeff
+            * sigma.fill_null(0.0)
+            * participation.pow(self.size_sensitivity)
+            * (safe_volume / self.volume_ref_usd).pow(-self.volume_sensitivity)
         )
-        impact = self.impact_coeff * sigma.fill_null(0.0) * participation.sqrt()
         return self.cost_multiplier * traded * ((fee + spread) / 1e4 + impact)
 
 
