@@ -1,4 +1,9 @@
-"""Per-symbol, per-date half-spread estimation — measured, not assumed.
+"""VENDORED from tca-lab (github.com/SagnikKK1/tca-lab) — canonical home of
+all cost-model code and its market studies. This copy exists so alphalab's
+CI works while tca-lab is private; it migrates to the package dependency
+when tca-lab goes public. Changes belong THERE first.
+
+Per-symbol, per-date half-spread estimation — measured, not assumed.
 
 Estimator: Abdi & Ranaldo (2017), run at the HOURLY frequency. With c = log
 close and eta = midpoint of a bar's log high/low range,

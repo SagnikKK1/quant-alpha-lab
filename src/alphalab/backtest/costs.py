@@ -1,4 +1,9 @@
-"""Execution cost model: taker fee + half-spread + square-root impact,
+"""VENDORED from tca-lab (github.com/SagnikKK1/tca-lab) — canonical home of
+all cost-model code and its market studies. This copy exists so alphalab's
+CI works while tca-lab is private; it migrates to the package dependency
+when tca-lab goes public. Changes belong THERE first.
+
+Execution cost model: taker fee + half-spread + square-root impact,
 plus funding accrual by position leg.
 
 All components are per-unit-of-traded-notional except funding, which accrues

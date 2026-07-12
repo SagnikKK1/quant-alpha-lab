@@ -55,6 +55,18 @@ python -m alphalab.data.ingest --symbols BTCUSDT ETHUSDT \
 Data is written under `./data/` (gitignored); override with
 `ALPHALAB_DATA_DIR`.
 
+## Related project
+
+The execution-cost models this repo's backtests charge (fees, structural
+spreads, calibrated impact law) live canonically in
+[tca-lab](https://github.com/SagnikKK1/tca-lab), together with their market
+studies (spread reconciliation vs real quotes, tape calibration of the
+impact exponents, order-book walk validation, cost-model bake-off).
+`src/alphalab/backtest/costs.py` and `spreads.py` are vendored copies kept
+in sync until tca-lab is public/installable; the strategy-coupled execution
+studies (delay-cost, execution frontier) remain here because they reprice
+this repo's trades.
+
 ## Project plan
 
 See `Quant_ML_Alpha_Lab_HANDOFF.md` (project root, outside this repo) for the
