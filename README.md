@@ -5,7 +5,12 @@ harness itself**: a point-in-time data layer, leakage tests in CI, purged
 walk-forward validation, a full trial registry feeding Deflated Sharpe / PBO,
 and live shadow-trading cost reconciliation.
 
-> Status: **Week 1 — data layer.** Everything else lands behind CI gates.
+> Status: **data layer, validation harness and cost-aware engine built**; a baseline
+> cross-sectional momentum signal is tear-sheeted. Implemented: point-in-time store,
+> future-truncation leakage detection with CI canaries, purged walk-forward validation,
+> stationary block bootstrap, append-only trial registry, funding- and cost-aware
+> execution engine. **Not yet implemented: Deflated Sharpe and PBO** (the registry
+> stores what they need); no lockbox-holdout results are claimed.
 
 ## Data layer guarantees
 
